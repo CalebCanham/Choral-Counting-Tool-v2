@@ -237,7 +237,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const _origPR = tablePresent.progressiveRender.bind(tablePresent)
             tablePresent.progressiveRender = (action) => {
                 // if there is an existing annotation canvas, serialize its contents
-                const existingCanvas = document.getElementById('choralTablePresent')?.querySelector('canvas.annotation-overlay')
+                // try to find any existing drawing canvas (preserve its content)
+                const existingCanvas = document.querySelector('canvas.drawing-canvas') || document.querySelector('canvas.global-drawing-canvas')
                 let savedDataURL = null
                 if (existingCanvas) {
                     try {
@@ -254,12 +255,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // restore drawing if possible
                 if (savedDataURL) {
-                    const newCanvas = document.getElementById('choralTablePresent')?.querySelector('canvas.annotation-overlay')
+                    const newCanvas = document.querySelector('canvas.drawing-canvas') || document.querySelector('canvas.global-drawing-canvas')
                     if (newCanvas) {
                         const img = new Image()
                         img.onload = () => {
                             const ctx = newCanvas.getContext('2d')
-                            // draw scaled to new canvas size
                             ctx.clearRect(0, 0, newCanvas.width, newCanvas.height)
                             ctx.drawImage(img, 0, 0, newCanvas.width, newCanvas.height)
                         }
@@ -334,7 +334,8 @@ function setupAnnotationCanvas() {
         drawingCanvas.style.left = '0'
         drawingCanvas.style.top = '0'
         drawingCanvas.style.zIndex = '900'
-        drawingCanvas.style.pointerEvents = 'auto'
+        // allow underlying controls to receive events
+        drawingCanvas.style.pointerEvents = 'none'
         presentDiv.appendChild(drawingCanvas)
     }
 
@@ -344,6 +345,8 @@ function setupAnnotationCanvas() {
     let isDrawing = false
     let lastX = 0
     let lastY = 0
+    let lastClientX = null
+    let lastClientY = null
     let tool = 'pen'
     const penColor = 'red'
     const penSize = 4
@@ -383,6 +386,12 @@ function setupAnnotationCanvas() {
             ctx.lineWidth = penSize
             ctx.lineCap = 'round'
             ctx.lineJoin = 'round'
+            // ensure cursor is visible and positioned when tool changes
+            cursor.style.display = 'block'
+            if (lastClientX !== null && lastClientY !== null) {
+                cursor.style.left = `${lastClientX}px`
+                cursor.style.top = `${lastClientY}px`
+            }
         } else {
             const dia = eraserSize
             cursor.style.width = `${dia}px`
@@ -395,6 +404,11 @@ function setupAnnotationCanvas() {
             ctx.lineWidth = eraserSize
             ctx.lineCap = 'round'
             ctx.lineJoin = 'round'
+            cursor.style.display = 'block'
+            if (lastClientX !== null && lastClientY !== null) {
+                cursor.style.left = `${lastClientX}px`
+                cursor.style.top = `${lastClientY}px`
+            }
         }
     }
 
@@ -459,42 +473,58 @@ function setupAnnotationCanvas() {
         cursor.style.display = 'block'
     }
 
-    // Touch handlers
-    function onTouchStart(e) {
+    // Use document-level pointer events so the canvas can remain pointer-events:none
+    addListener(document, 'pointerdown', (e) => {
         if (!shouldDraw(e.target)) return
         const p = getPosFromEvent(e)
         startDraw(p.x, p.y)
+        cursor.style.display = 'block'
         e.preventDefault()
-    }
+    }, { passive: false })
 
-    function onTouchMove(e) {
-        if (!shouldDraw(e.target)) return
+    addListener(document, 'pointermove', (e) => {
+        // remember last client coordinates so tool switches can position cursor immediately
+        lastClientX = e.clientX
+        lastClientY = e.clientY
         const p = getPosFromEvent(e)
-        cursor.style.left = `${e.touches[0].clientX}px`
-        cursor.style.top = `${e.touches[0].clientY}px`
+        cursor.style.left = `${e.clientX}px`
+        cursor.style.top = `${e.clientY}px`
         if (isDrawing) drawTo(p.x, p.y)
-        e.preventDefault()
-    }
+    }, { passive: false })
 
-    function onTouchEnd(e) {
+    addListener(document, 'pointerup', (e) => {
         stopDraw()
-        e.preventDefault()
-    }
+    })
 
-    // Attach listeners
-    addListener(drawingCanvas, 'mousedown', onMouseDown)
-    addListener(drawingCanvas, 'mousemove', onMouseMove)
-    addListener(drawingCanvas, 'mouseup', onMouseUp)
-    addListener(drawingCanvas, 'mouseleave', onMouseLeave)
-    addListener(drawingCanvas, 'mouseenter', onMouseEnter)
-    addListener(drawingCanvas, 'touchstart', onTouchStart, { passive: false })
-    addListener(drawingCanvas, 'touchmove', onTouchMove, { passive: false })
-    addListener(drawingCanvas, 'touchend', onTouchEnd, { passive: false })
+    addListener(document, 'pointerleave', () => { cursor.style.display = 'none' })
+    addListener(document, 'pointerenter', () => { cursor.style.display = 'block' })
 
     // Resize canvas to cover full content
     function resizeCanvas() {
-        drawingCanvas.width = Math.round(presentDiv.offsetWidth)
-        drawingCanvas.height = Math.round(presentDiv.offsetHeight)
+        const newW = Math.round(presentDiv.offsetWidth)
+        const newH = Math.round(presentDiv.offsetHeight)
+        try {
+            const prevW = drawingCanvas.width || 0
+            const prevH = drawingCanvas.height || 0
+            if (prevW > 0 && prevH > 0) {
+                const tmp = document.createElement('canvas')
+                tmp.width = prevW
+                tmp.height = prevH
+                tmp.getContext('2d').drawImage(drawingCanvas, 0, 0)
+
+                drawingCanvas.width = newW
+                drawingCanvas.height = newH
+
+                ctx.drawImage(tmp, 0, 0)
+            } else {
+                drawingCanvas.width = newW
+                drawingCanvas.height = newH
+            }
+        } catch (err) {
+            drawingCanvas.width = newW
+            drawingCanvas.height = newH
+        }
+
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
         setTool(tool)
