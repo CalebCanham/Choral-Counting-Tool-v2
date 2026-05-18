@@ -1,3 +1,5 @@
+// 
+
 import { CustomTable, Fraction } from './classes.js'
 import { generateData } from './functions.js'
 
