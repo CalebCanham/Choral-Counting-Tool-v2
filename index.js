@@ -1,5 +1,3 @@
-// 
-
 import { CustomTable, Fraction } from './classes.js'
 import { generateData } from './functions.js'
 
@@ -321,24 +319,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Annotation canvas and drawing tools
 function setupAnnotationCanvas() {
-    const presentDiv = document.getElementById('present')
-    if (!presentDiv) return
-
-    // Ensure presentDiv uses relative positioning so canvas scrolls with it
-    presentDiv.style.position = 'relative'
-
-    // Create or reuse single drawing canvas that covers entire content area
-    let drawingCanvas = presentDiv.querySelector('canvas.drawing-canvas')
+    // Create or reuse single document-wide drawing canvas that covers the whole page
+    // This allows drawing anywhere on the page, not just inside the present area.
+    let drawingCanvas = document.querySelector('canvas.global-drawing-canvas') || document.querySelector('canvas.drawing-canvas')
     if (!drawingCanvas) {
         drawingCanvas = document.createElement('canvas')
-        drawingCanvas.className = 'drawing-canvas'
+        // prefer new canonical name but accept legacy class
+        drawingCanvas.className = 'global-drawing-canvas'
         drawingCanvas.style.position = 'absolute'
         drawingCanvas.style.left = '0'
         drawingCanvas.style.top = '0'
         drawingCanvas.style.zIndex = '900'
-        // allow underlying controls to receive events
         drawingCanvas.style.pointerEvents = 'none'
-        presentDiv.appendChild(drawingCanvas)
+        // append to body so canvas covers the entire document and scrolls with content
+        document.body.appendChild(drawingCanvas)
     }
 
     const ctx = drawingCanvas.getContext('2d')
@@ -501,10 +495,12 @@ function setupAnnotationCanvas() {
     addListener(document, 'pointerleave', () => { cursor.style.display = 'none' })
     addListener(document, 'pointerenter', () => { cursor.style.display = 'block' })
 
-    // Resize canvas to cover full content
+    // Resize canvas to cover full document content
     function resizeCanvas() {
-        const newW = Math.round(presentDiv.offsetWidth)
-        const newH = Math.round(presentDiv.offsetHeight)
+        const doc = document.documentElement
+        const body = document.body
+        const newW = Math.max(doc.scrollWidth, body.scrollWidth, doc.clientWidth)
+        const newH = Math.max(doc.scrollHeight, body.scrollHeight, doc.clientHeight)
         try {
             const prevW = drawingCanvas.width || 0
             const prevH = drawingCanvas.height || 0
@@ -532,8 +528,11 @@ function setupAnnotationCanvas() {
         setTool(tool)
     }
 
+    // keep canvas sized to document on loads/resizes/scrolls
     resizeCanvas()
     addListener(window, 'resize', resizeCanvas)
+    addListener(window, 'orientationchange', resizeCanvas)
+    addListener(window, 'scroll', () => { /* canvas is absolute; no size change, but ensure still sized after heavy scroll */ })
 
     // Expose state for buttons
     window.__drawingState = {
@@ -583,8 +582,11 @@ function setupAnnotationCanvas() {
             }
         } catch (err) {}
         
-        const dc = document.querySelector('canvas.drawing-canvas')
-        if (dc && dc.parentNode) dc.parentNode.removeChild(dc)
+        const selectors = ['canvas.drawing-canvas', 'canvas.global-drawing-canvas']
+        for (const sel of selectors) {
+            const dc = document.querySelector(sel)
+            if (dc && dc.parentNode) dc.parentNode.removeChild(dc)
+        }
         
         const cEl = document.querySelector('.drawing-cursor')
         if (cEl && cEl.parentNode) cEl.parentNode.removeChild(cEl)
